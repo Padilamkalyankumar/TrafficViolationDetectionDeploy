@@ -1,7 +1,10 @@
-# requirements.txt
-streamlit==1.25.0
+streamlit==1.33.0
 streamlit-drawable-canvas==0.9.3
-opencv-python-headless==4.12.0.88
-pillow==9.5.0
-ultralytics==8.2.0
-numpy
+opencv-python-headless==4.8.1.78
+ultralytics==8.3.12
+torch
+torchvision
+torchaudio
+Pillow==10.2.0
+numpy==1.26.4
+ffmpeg-python
