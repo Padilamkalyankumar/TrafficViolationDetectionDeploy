@@ -1,6 +1,5 @@
 # Streamlit web app
-streamlit==1.24.0
-
+streamlit>=1.25.0
 
 # Ultralytics YOLO (model API)
 ultralytics>=8.0.0
