@@ -352,3 +352,52 @@ if uploaded_video:
                     st.cache_data.clear()
                 except Exception as e:
                     st.warning(f"Cleanup failed: {e}")
+# Monkeypatch helper: ensure streamlit.elements.image.image_to_url exists
+import streamlit as st
+try:
+    import streamlit.elements.image as _st_image
+except Exception:
+    _st_image = None
+
+if _st_image is not None and not hasattr(_st_image, "image_to_url"):
+    import io, base64
+    from PIL import Image
+    import numpy as np
+
+    def _image_to_url(img, clamp=False):
+        """
+        Minimal replacement for Streamlit's internal `image_to_url`.
+        Accepts:
+        - PIL.Image.Image
+        - numpy.ndarray (H,W[,C])
+        - bytes (already-encoded image bytes)
+        Returns a data URL (data:image/png;base64,...).
+        """
+        # If bytes, assume already-encoded image bytes (PNG/JPEG)
+        if isinstance(img, (bytes, bytearray)):
+            b = bytes(img)
+        else:
+            # Convert numpy array -> PIL
+            if isinstance(img, np.ndarray):
+                # numpy array probably in RGB order (H,W,3)
+                img = Image.fromarray(img)
+            if isinstance(img, Image.Image):
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                b = buf.getvalue()
+            else:
+                # Fallback: try to coerce into PIL via bytes
+                try:
+                    buf = io.BytesIO(img)
+                    pil = Image.open(buf)
+                    out = io.BytesIO()
+                    pil.save(out, format="PNG")
+                    b = out.getvalue()
+                except Exception as e:
+                    raise TypeError(f"Unsupported image type for image_to_url: {type(img)}") from e
+
+        b64 = base64.b64encode(b).decode("ascii")
+        return f"data:image/png;base64,{b64}"
+
+    # Attach monkeypatch
+    _st_image.image_to_url = _image_to_url
