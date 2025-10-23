@@ -4,10 +4,63 @@ import os
 import tempfile
 import subprocess
 import numpy as np
+import shutil
+import zipfile
 from ultralytics import YOLO
 from datetime import datetime
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
+import io
+from typing import List
+
+
+@st.cache_data
+def make_zip_bytes(root_dir: str = "detected_violations") -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(root_dir):
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                arcname = os.path.relpath(fpath, root_dir)
+                zf.write(fpath, arcname)
+    buf.seek(0)
+    return buf.read()
+
+
+@st.cache_data
+def read_file_bytes(path: str) -> bytes:
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+@st.cache_data
+def make_combined_zip_bytes(video_path: str | None, root_dir: str = "detected_violations") -> bytes:
+    """Create a zip in-memory containing the processed video (if present) and all detected images.
+
+    video_path: path to processed video or temp output; if None or missing, only images are zipped.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # add video file under top-level folder 'video'
+        if video_path and os.path.exists(video_path):
+            arc = os.path.join("video", os.path.basename(video_path))
+            zf.write(video_path, arc)
+
+        # add detected images keeping their subfolders
+        if os.path.exists(root_dir):
+            for root, dirs, files in os.walk(root_dir):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    # store path relative to the detected_violations root
+                    rel_root = os.path.relpath(root, root_dir)
+                    if rel_root == '.' or rel_root == './':
+                        arcname = os.path.join('images', fname)
+                    else:
+                        arcname = os.path.join('images', rel_root, fname)
+                    zf.write(fpath, arcname)
+
+    buf.seek(0)
+    return buf.read()
 
 # -------------------------------------------------
 # Streamlit setup
@@ -203,11 +256,73 @@ if uploaded_video:
             out.release()
 
             final_output = "processed_final.mp4"
-            subprocess.call([
+            # use subprocess.run so we can capture ffmpeg errors and decide a fallback
+            ffmpeg_cmd = [
                 "ffmpeg", "-y", "-i", temp_out,
                 "-vcodec", "libx264", "-movflags", "faststart", final_output
-            ])
+            ]
+            try:
+                proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+                if proc.returncode != 0:
+                    st.warning("ffmpeg returned non-zero exit code. Falling back to temporary output if available.")
+                    st.error(proc.stderr)
+            except FileNotFoundError:
+                st.warning("ffmpeg executable not found. Ensure ffmpeg is installed and on PATH. Falling back to temporary output if available.")
+                proc = None
+
 
             st.success("✅ Detection completed! Unique violations captured.")
             st.video(final_output)
             st.info("📁 Traffic violations → `detected_violations/traffic/`\n📁 Helmet violations → `detected_violations/helmet/`")
+
+            # -- Provide download for processed video --
+            # Prefer final_output if it exists, otherwise try temp_out
+            video_path_for_download = None
+            if os.path.exists(final_output):
+                video_path_for_download = final_output
+            elif os.path.exists(temp_out):
+                video_path_for_download = temp_out
+                st.info("Using temporary output for download because final re-encode is unavailable.")
+            else:
+                st.error("No output video found to download.")
+
+            if video_path_for_download:
+                try:
+                    video_bytes = read_file_bytes(video_path_for_download)
+                    st.download_button("⬇️ Download Processed Video", data=video_bytes,
+                                       file_name=os.path.basename(video_path_for_download), mime="video/mp4", key="dl_video")
+                except Exception as e:
+                    st.warning(f"Video download not available: {e}")
+
+            # -- Combined download: video + detected images in one zip --
+            try:
+                video_for_zip = video_path_for_download if video_path_for_download and os.path.exists(video_path_for_download) else None
+                combined_bytes = make_combined_zip_bytes(video_for_zip, root_dir='detected_violations')
+                st.download_button("⬇️ Download Processed Video + Detected Images (ZIP)",
+                                   data=combined_bytes,
+                                   file_name="trafficviolations_package.zip",
+                                   mime="application/zip",
+                                   key="dl_combined")
+            except Exception as e:
+                st.warning(f"Combined download not available: {e}")
+
+            # optional: cleanup temp files
+            try:
+                if os.path.exists(temp_out):
+                    os.remove(temp_out)
+                if os.path.exists(final_output):
+                    pass  # keep final_output for download
+            except:
+                pass
+
+            if st.button("🧹 Cleanup temp files"):
+                try:
+                    if os.path.exists(temp_out): os.remove(temp_out)
+                    if os.path.exists(final_output): os.remove(final_output)
+                    st.success("Temporary files removed.")
+                    # clear cached bytes
+                    st.cache_data.clear()
+                except Exception as e:
+                    st.warning(f"Cleanup failed: {e}")
+
+
