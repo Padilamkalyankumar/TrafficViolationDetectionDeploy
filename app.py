@@ -12,6 +12,8 @@ from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 import io
 from typing import List
+import base64
+import inspect
 
 
 @st.cache_data
@@ -98,17 +100,43 @@ if uploaded_video:
     st.subheader("🟢 Draw a line by clicking two points")
     st.write("Click exactly two points — a thin straight line will connect them automatically.")
 
+    # Prepare background image and a data URL (in case canvas supports background_image_url)
     bg_image = Image.fromarray(frame_rgb)
-    canvas = st_canvas(
+
+    def pil_image_to_data_url(pil_img: Image.Image) -> str:
+        buf = io.BytesIO()
+        pil_img.save(buf, format='PNG')
+        b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+        return f"data:image/png;base64,{b64}"
+
+    bg_url = pil_image_to_data_url(bg_image)
+
+    # Build kwargs dynamically depending on st_canvas signature to avoid TypeError
+    canvas_kwargs = dict(
         fill_color="rgba(255,255,255,0)",
         stroke_width=2,
         stroke_color="red",
-        background_image=bg_image,
         height=h,
         width=w,
         drawing_mode="point",
         key="draw_points",
     )
+
+    try:
+        canvas_sig = inspect.signature(st_canvas)
+        if 'background_image_url' in canvas_sig.parameters:
+            canvas_kwargs['background_image_url'] = bg_url
+        else:
+            canvas_kwargs['background_image'] = bg_image
+    except (ValueError, TypeError):
+        # If introspection fails for any reason, try a safe two-step approach:
+        # prefer URL param, fall back to image.
+        try:
+            canvas_kwargs['background_image_url'] = bg_url
+        except Exception:
+            canvas_kwargs['background_image'] = bg_image
+
+    canvas = st_canvas(**canvas_kwargs)
 
     if canvas.json_data and len(canvas.json_data["objects"]) >= 2:
         points = [(obj["left"], obj["top"]) for obj in canvas.json_data["objects"][:2]]
@@ -324,5 +352,3 @@ if uploaded_video:
                     st.cache_data.clear()
                 except Exception as e:
                     st.warning(f"Cleanup failed: {e}")
-
-
