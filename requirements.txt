@@ -1,26 +1,15 @@
-# streamlit==1.33.0
-# streamlit-drawable-canvas==0.9.3
-# opencv-python-headless==4.8.1.78
-# ultralytics==8.3.12
-# torch
-# torchvision
-# torchaudio
-# Pillow==10.2.0
-# numpy==1.26.4
-# ffmpeg-python
-
 # Streamlit web app
 streamlit>=1.25.0
 
 # Ultralytics YOLO (model API)
 ultralytics>=8.0.0
 
-# PyTorch (add below note - install separately for correct build)
+# PyTorch (install separately if needed; pin to appropriate build for your environment)
 torch
 torchvision
 
-# OpenCV (headless for servers; use opencv-python if you need GUI features locally)
-opencv-python-headless>=4.7.0
+# Use headless OpenCV (no system libGL dependency)
+opencv-python-headless==4.7.0.72
 
 # Image processing, canvas, numerical
 Pillow>=9.0.0
